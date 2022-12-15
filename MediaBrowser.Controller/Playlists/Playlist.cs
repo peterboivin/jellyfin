@@ -146,7 +146,8 @@ namespace MediaBrowser.Controller.Playlists
 
         public override IEnumerable<BaseItem> GetRecursiveChildren(User user, InternalItemsQuery query)
         {
-            return GetPlayableItems(user, query);
+            var random = new Random();
+            return GetPlayableItems(user, query).OrderBy(x => random.Next()).Take(150);
         }
 
         public IEnumerable<Tuple<LinkedChild, BaseItem>> GetManageableItems()
