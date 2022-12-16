@@ -34,7 +34,7 @@ namespace MediaBrowser.Providers.MediaInfo
 {
     public class FFProbeVideoInfo
     {
-        private readonly ILogger _logger;
+        private readonly ILogger<FFProbeVideoInfo> _logger;
         private readonly IMediaEncoder _mediaEncoder;
         private readonly IItemRepository _itemRepo;
         private readonly IBlurayExaminer _blurayExaminer;
@@ -48,10 +48,8 @@ namespace MediaBrowser.Providers.MediaInfo
         private readonly SubtitleResolver _subtitleResolver;
         private readonly IMediaSourceManager _mediaSourceManager;
 
-        private readonly long _dummyChapterDuration = TimeSpan.FromMinutes(5).Ticks;
-
         public FFProbeVideoInfo(
-            ILogger logger,
+            ILogger<FFProbeVideoInfo> logger,
             IMediaSourceManager mediaSourceManager,
             IMediaEncoder mediaEncoder,
             IItemRepository itemRepo,
@@ -182,7 +180,7 @@ namespace MediaBrowser.Providers.MediaInfo
 
             var startIndex = mediaStreams.Count == 0 ? 0 : (mediaStreams.Max(i => i.Index) + 1);
 
-            if (mediaInfo != null)
+            if (mediaInfo is not null)
             {
                 foreach (var mediaStream in mediaInfo.MediaStreams)
                 {
@@ -197,7 +195,7 @@ namespace MediaBrowser.Providers.MediaInfo
                 //    .Replace("matroska", "mkv", StringComparison.OrdinalIgnoreCase);
 
                 // For DVDs this may not always be accurate, so don't set the runtime if the item already has one
-                var needToSetRuntime = video.VideoType != VideoType.Dvd || video.RunTimeTicks == null || video.RunTimeTicks.Value == 0;
+                var needToSetRuntime = video.VideoType != VideoType.Dvd || video.RunTimeTicks is null || video.RunTimeTicks.Value == 0;
 
                 if (needToSetRuntime)
                 {
@@ -220,7 +218,7 @@ namespace MediaBrowser.Providers.MediaInfo
                 video.Container = mediaInfo.Container;
 
                 chapters = mediaInfo.Chapters ?? Array.Empty<ChapterInfo>();
-                if (blurayInfo != null)
+                if (blurayInfo is not null)
                 {
                     FetchBdInfo(video, ref chapters, mediaStreams, blurayInfo);
                 }
@@ -243,7 +241,7 @@ namespace MediaBrowser.Providers.MediaInfo
 
             var libraryOptions = _libraryManager.GetLibraryOptions(video);
 
-            if (mediaInfo != null)
+            if (mediaInfo is not null)
             {
                 FetchEmbeddedInfo(video, mediaInfo, options, libraryOptions);
                 FetchPeople(video, mediaInfo, options);
@@ -290,7 +288,7 @@ namespace MediaBrowser.Providers.MediaInfo
                 NormalizeChapterNames(chapters);
 
                 var extractDuringScan = false;
-                if (libraryOptions != null)
+                if (libraryOptions is not null)
                 {
                     extractDuringScan = libraryOptions.ExtractChapterImagesDuringLibraryScan;
                 }
@@ -335,7 +333,7 @@ namespace MediaBrowser.Providers.MediaInfo
                 var videoStream = mediaStreams.FirstOrDefault(s => s.Type == MediaStreamType.Video);
 
                 // Grab the values that ffprobe recorded
-                if (videoStream != null)
+                if (videoStream is not null)
                 {
                     currentBitRate = videoStream.BitRate;
                     currentWidth = videoStream.Width;
@@ -351,7 +349,7 @@ namespace MediaBrowser.Providers.MediaInfo
                     video.RunTimeTicks = blurayInfo.RunTimeTicks;
                 }
 
-                if (blurayInfo.Chapters != null)
+                if (blurayInfo.Chapters is not null)
                 {
                     double[] brChapter = blurayInfo.Chapters;
                     chapters = new ChapterInfo[brChapter.Length];
@@ -367,7 +365,7 @@ namespace MediaBrowser.Providers.MediaInfo
                 videoStream = mediaStreams.FirstOrDefault(s => s.Type == MediaStreamType.Video);
 
                 // Use the ffprobe values if these are empty
-                if (videoStream != null)
+                if (videoStream is not null)
                 {
                     videoStream.BitRate = IsEmpty(videoStream.BitRate) ? currentBitRate : videoStream.BitRate;
                     videoStream.Width = IsEmpty(videoStream.Width) ? currentWidth : videoStream.Width;
@@ -486,8 +484,8 @@ namespace MediaBrowser.Providers.MediaInfo
             {
                 if (!string.IsNullOrWhiteSpace(data.Name) && libraryOptions.EnableEmbeddedTitles)
                 {
-                    // Don't use the embedded name for extras because it will often be the same name as the movie
-                    if (!video.ExtraType.HasValue)
+                    // Separate option to use the embedded name for extras because it will often be the same name as the movie
+                    if (!video.ExtraType.HasValue || libraryOptions.EnableEmbeddedExtrasTitles)
                     {
                         video.Name = data.Name;
                     }
@@ -574,7 +572,7 @@ namespace MediaBrowser.Providers.MediaInfo
             bool requirePerfectMatch;
             bool enabled;
 
-            if (libraryOptions.SubtitleDownloadLanguages == null)
+            if (libraryOptions.SubtitleDownloadLanguages is null)
             {
                 subtitleDownloadLanguages = subtitleOptions.DownloadLanguages;
                 skipIfEmbeddedSubtitlesPresent = subtitleOptions.SkipIfEmbeddedSubtitlesPresent;
@@ -651,6 +649,7 @@ namespace MediaBrowser.Providers.MediaInfo
         private ChapterInfo[] CreateDummyChapters(Video video)
         {
             var runtime = video.RunTimeTicks ?? 0;
+            long dummyChapterDuration = TimeSpan.FromSeconds(_config.Configuration.DummyChapterDuration).Ticks;
 
             if (runtime < 0)
             {
@@ -662,13 +661,13 @@ namespace MediaBrowser.Providers.MediaInfo
                         runtime));
             }
 
-            if (runtime < _dummyChapterDuration)
+            if (runtime < dummyChapterDuration)
             {
                 return Array.Empty<ChapterInfo>();
             }
 
-            // Limit to 100 chapters just in case there's some incorrect metadata here
-            int chapterCount = (int)Math.Min(runtime / _dummyChapterDuration, 100);
+            // Limit the chapters just in case there's some incorrect metadata here
+            int chapterCount = (int)Math.Min(runtime / dummyChapterDuration, _config.Configuration.DummyChapterCount);
             var chapters = new ChapterInfo[chapterCount];
 
             long currentChapterTicks = 0;
@@ -679,7 +678,7 @@ namespace MediaBrowser.Providers.MediaInfo
                     StartPositionTicks = currentChapterTicks
                 };
 
-                currentChapterTicks += _dummyChapterDuration;
+                currentChapterTicks += dummyChapterDuration;
             }
 
             return chapters;
@@ -694,7 +693,7 @@ namespace MediaBrowser.Providers.MediaInfo
 
             byte? titleNumber = null;
 
-            if (primaryTitle != null)
+            if (primaryTitle is not null)
             {
                 titleNumber = primaryTitle.VideoTitleSetNumber;
                 item.RunTimeTicks = GetRuntime(primaryTitle);

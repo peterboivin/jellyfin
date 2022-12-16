@@ -51,6 +51,7 @@ namespace MediaBrowser.MediaEncoding.Encoder
         private readonly IFileSystem _fileSystem;
         private readonly ILocalizationManager _localization;
         private readonly IConfiguration _config;
+        private readonly IServerConfigurationManager _serverConfig;
         private readonly string _startupOptionFFmpegPath;
 
         private readonly SemaphoreSlim _thumbnailResourcePool = new SemaphoreSlim(2, 2);
@@ -74,7 +75,8 @@ namespace MediaBrowser.MediaEncoding.Encoder
         private bool _isVaapiDeviceInteli965 = false;
         private bool _isVaapiDeviceSupportVulkanFmtModifier = false;
 
-        private static string[] _vulkanFmtModifierExts = {
+        private static string[] _vulkanFmtModifierExts =
+        {
             "VK_KHR_sampler_ycbcr_conversion",
             "VK_EXT_image_drm_format_modifier",
             "VK_KHR_external_memory_fd",
@@ -93,13 +95,15 @@ namespace MediaBrowser.MediaEncoding.Encoder
             IServerConfigurationManager configurationManager,
             IFileSystem fileSystem,
             ILocalizationManager localization,
-            IConfiguration config)
+            IConfiguration config,
+            IServerConfigurationManager serverConfig)
         {
             _logger = logger;
             _configurationManager = configurationManager;
             _fileSystem = fileSystem;
             _localization = localization;
             _config = config;
+            _serverConfig = serverConfig;
             _startupOptionFFmpegPath = config.GetValue<string>(Controller.Extensions.ConfigurationExtensions.FfmpegPathKey) ?? string.Empty;
             _jsonSerializerOptions = JsonDefaults.Options;
         }
@@ -153,7 +157,7 @@ namespace MediaBrowser.MediaEncoding.Encoder
             _configurationManager.SaveConfiguration("encoding", options);
 
             // Only if mpeg path is set, try and set path to probe
-            if (_ffmpegPath != null)
+            if (_ffmpegPath is not null)
             {
                 // Determine a probe path from the mpeg path
                 _ffprobePath = Regex.Replace(_ffmpegPath, @"[^\/\\]+?(\.[^\/\\\n.]+)?$", @"ffprobe$1");
@@ -411,8 +415,6 @@ namespace MediaBrowser.MediaEncoding.Encoder
                 analyzeDuration = "-analyzeduration " + ffmpegAnalyzeDuration;
             }
 
-            var forceEnableLogging = request.MediaSource.Protocol != MediaProtocol.File;
-
             return GetMediaInfoInternal(
                 GetInputArgument(inputFile, request.MediaSource),
                 request.MediaSource.Path,
@@ -421,7 +423,6 @@ namespace MediaBrowser.MediaEncoding.Encoder
                 analyzeDuration,
                 request.MediaType == DlnaProfileType.Audio,
                 request.MediaSource.VideoType,
-                forceEnableLogging,
                 cancellationToken);
         }
 
@@ -469,7 +470,6 @@ namespace MediaBrowser.MediaEncoding.Encoder
             string probeSizeArgument,
             bool isAudio,
             VideoType? videoType,
-            bool forceEnableLogging,
             CancellationToken cancellationToken)
         {
             var args = extractChapters
@@ -484,7 +484,7 @@ namespace MediaBrowser.MediaEncoding.Encoder
                     CreateNoWindow = true,
                     UseShellExecute = false,
 
-                    // Must consume both or ffmpeg may hang due to deadlocks. See comments below.
+                    // Must consume both or ffmpeg may hang due to deadlocks.
                     RedirectStandardOutput = true,
 
                     FileName = _ffprobePath,
@@ -496,21 +496,13 @@ namespace MediaBrowser.MediaEncoding.Encoder
                 EnableRaisingEvents = true
             };
 
-            if (forceEnableLogging)
-            {
-                _logger.LogInformation("{ProcessFileName} {ProcessArgs}", process.StartInfo.FileName, process.StartInfo.Arguments);
-            }
-            else
-            {
-                _logger.LogDebug("{ProcessFileName} {ProcessArgs}", process.StartInfo.FileName, process.StartInfo.Arguments);
-            }
+            _logger.LogInformation("Starting {ProcessFileName} with args {ProcessArgs}", _ffprobePath, args);
 
             using (var processWrapper = new ProcessWrapper(process, this))
             {
                 await using var memoryStream = new MemoryStream();
-                _logger.LogDebug("Starting ffprobe with args {Args}", args);
                 StartProcess(processWrapper);
-                await process.StandardOutput.BaseStream.CopyToAsync(memoryStream, cancellationToken: cancellationToken);
+                await process.StandardOutput.BaseStream.CopyToAsync(memoryStream, cancellationToken);
                 memoryStream.Seek(0, SeekOrigin.Begin);
                 InternalMediaInfoResult result;
                 try
@@ -518,7 +510,7 @@ namespace MediaBrowser.MediaEncoding.Encoder
                     result = await JsonSerializer.DeserializeAsync<InternalMediaInfoResult>(
                                         memoryStream,
                                         _jsonSerializerOptions,
-                                        cancellationToken: cancellationToken).ConfigureAwait(false);
+                                        cancellationToken).ConfigureAwait(false);
                 }
                 catch
                 {
@@ -527,12 +519,12 @@ namespace MediaBrowser.MediaEncoding.Encoder
                     throw;
                 }
 
-                if (result == null || (result.Streams == null && result.Format == null))
+                if (result is null || (result.Streams is null && result.Format is null))
                 {
                     throw new FfmpegException("ffprobe failed - streams and format are both null.");
                 }
 
-                if (result.Streams != null)
+                if (result.Streams is not null)
                 {
                     // Normalize aspect ratio if invalid
                     foreach (var stream in result.Streams)
@@ -606,12 +598,34 @@ namespace MediaBrowser.MediaEncoding.Encoder
             return await ExtractImageInternal(inputArgument, container, videoStream, imageStreamIndex, threedFormat, offset, false, targetFormat, cancellationToken).ConfigureAwait(false);
         }
 
+        private string GetImageResolutionParameter()
+        {
+            string imageResolutionParameter;
+
+            imageResolutionParameter = _serverConfig.Configuration.ChapterImageResolution switch
+            {
+                ImageResolution.P144 => "256x144",
+                ImageResolution.P240 => "426x240",
+                ImageResolution.P360 => "640x360",
+                ImageResolution.P480 => "854x480",
+                ImageResolution.P720 => "1280x720",
+                ImageResolution.P1080 => "1920x1080",
+                ImageResolution.P1440 => "2560x1440",
+                ImageResolution.P2160 => "3840x2160",
+                _ => string.Empty
+            };
+
+            if (!string.IsNullOrEmpty(imageResolutionParameter))
+            {
+                imageResolutionParameter = " -s " + imageResolutionParameter;
+            }
+
+            return imageResolutionParameter;
+        }
+
         private async Task<string> ExtractImageInternal(string inputPath, string container, MediaStream videoStream, int? imageStreamIndex, Video3DFormat? threedFormat, TimeSpan? offset, bool useIFrame, ImageFormat? targetFormat, CancellationToken cancellationToken)
         {
-            if (string.IsNullOrEmpty(inputPath))
-            {
-                throw new ArgumentNullException(nameof(inputPath));
-            }
+            ArgumentException.ThrowIfNullOrEmpty(inputPath);
 
             var outputExtension = targetFormat switch
             {
@@ -631,7 +645,7 @@ namespace MediaBrowser.MediaEncoding.Encoder
             var filters = new List<string>();
 
             // deinterlace using bwdif algorithm for video stream.
-            if (videoStream != null && videoStream.IsInterlaced)
+            if (videoStream is not null && videoStream.IsInterlaced)
             {
                 filters.Add("bwdif=0:-1:0");
             }
@@ -676,7 +690,7 @@ namespace MediaBrowser.MediaEncoding.Encoder
 
             var vf = string.Join(',', filters);
             var mapArg = imageStreamIndex.HasValue ? (" -map 0:" + imageStreamIndex.Value.ToString(CultureInfo.InvariantCulture)) : string.Empty;
-            var args = string.Format(CultureInfo.InvariantCulture, "-i {0}{3} -threads {4} -v quiet -vframes 1 -vf {2} -f image2 \"{1}\"", inputPath, tempExtractPath, vf, mapArg, _threads);
+            var args = string.Format(CultureInfo.InvariantCulture, "-i {0}{3} -threads {4} -v quiet -vframes 1 -vf {2}{5} -f image2 \"{1}\"", inputPath, tempExtractPath, vf, mapArg, _threads, GetImageResolutionParameter());
 
             if (offset.HasValue)
             {
@@ -988,7 +1002,7 @@ namespace MediaBrowser.MediaEncoding.Encoder
             {
                 if (!_disposed)
                 {
-                    if (Process != null)
+                    if (Process is not null)
                     {
                         Process.Exited -= OnProcessExited;
                         DisposeProcess(Process);

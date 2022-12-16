@@ -16,15 +16,15 @@ namespace Jellyfin.Extensions
         /// <returns>A signed integer that indicates the relative values of <c>x</c> and <c>y</c>.</returns>
         public static int CompareValues(string? s1, string? s2)
         {
-            if (s1 == null && s2 == null)
+            if (s1 is null && s2 is null)
             {
                 return 0;
             }
-            else if (s1 == null)
+            else if (s1 is null)
             {
                 return -1;
             }
-            else if (s2 == null)
+            else if (s2 is null)
             {
                 return 1;
             }
@@ -128,9 +128,7 @@ namespace Jellyfin.Extensions
                         return result;
                     }
                 }
-#pragma warning disable SA1500 // TODO remove with StyleCop.Analyzers v1.2.0 https://github.com/DotNetAnalyzers/StyleCopAnalyzers/pull/3196
             } while (pos1 < len1 && pos2 < len2);
-#pragma warning restore SA1500
 
             return len1 - len2;
         }
