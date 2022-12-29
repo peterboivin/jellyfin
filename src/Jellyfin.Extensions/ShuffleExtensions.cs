@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 
 namespace Jellyfin.Extensions
 {
@@ -26,13 +27,11 @@ namespace Jellyfin.Extensions
         /// <typeparam name="T">The type.</typeparam>
         public static void Shuffle<T>(this IList<T> list, Random rng)
         {
-            int n = list.Count;
-            while (n > 1)
+            var randomList = list.OrderBy(x => rng.Next()).Take(150);
+
+            foreach(T tNode in randomList)
             {
-                int k = rng.Next(n--);
-                T value = list[k];
-                list[k] = list[n];
-                list[n] = value;
+                T value = tNode;
             }
         }
     }
