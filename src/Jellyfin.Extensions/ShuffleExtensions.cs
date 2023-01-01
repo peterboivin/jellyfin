@@ -27,11 +27,20 @@ namespace Jellyfin.Extensions
         /// <typeparam name="T">The type.</typeparam>
         public static void Shuffle<T>(this IList<T> list, Random rng)
         {
-            var randomList = list.OrderBy(x => rng.Next()).Take(150);
-
-            foreach(T tNode in randomList)
+            IEnumerable<T> newList = list.OrderBy(x => rng.Next(list.Count)).Take(150);
+            list.Clear();
+            foreach (var t in newList)
             {
-                T value = tNode;
+                list.Add(t);
+            }
+
+            int n = list.Count;
+            while (n > 1)
+            {
+                int k = rng.Next(n--);
+                T value = list[k];
+                list[k] = list[n];
+                list[n] = value;
             }
         }
     }

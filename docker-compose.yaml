@@ -1,0 +1,17 @@
+version: "3"
+services:
+  jellyfin:
+    image: jellyfin/jellyfin:latest
+    container_name: jellyfin-peter-newcode
+    volumes:
+      - ./config:/config
+      - ./jellyfin/cache:/cache
+      - /Volumes/THKAILAR1TB/Music:/media:ro
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 1024M
+    ports:
+      - "8096:8096"
