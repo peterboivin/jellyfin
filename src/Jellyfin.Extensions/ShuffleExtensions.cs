@@ -42,6 +42,12 @@ namespace Jellyfin.Extensions
                 list[k] = list[n];
                 list[n] = value;
             }
+
+            var selectedList = Enumerable.Range(0, 150)
+                                .Select(i => list.ElementAt(rng.Next(list.Count)))
+                                .ToList();
+
+            list = selectedList;
         }
     }
 }
